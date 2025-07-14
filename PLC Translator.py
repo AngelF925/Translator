@@ -89,13 +89,13 @@ def translate_file():
             current_batch = lines[i:i + batch_size]
 
             for j, line in enumerate(current_batch):
-                parts = line.strip("\n").split("\t")
+                parts = line.rstrip("\n").split("\t")
                 if len(parts) >= 2 and re.search(r'[가-힣]', parts[1]):
                     batch_ids.append(parts[0])
                     batch_originals.append(parts[1])
                     batch_indexes.append(i + j)
                 else:
-                    translated_lines.append(line)
+                    translated_lines.append(line.rstrip("\n") + "\n")
 
             translated_batch = []
 
@@ -264,21 +264,20 @@ korean_box.bind("<KeyRelease>", clear_english_if_empty)
 def translate_all_text(event=None):
     text = korean_box.get("1.0", "end").strip()
     if not text:
-        # clear the right box if left is empty
         english_box.configure(state="normal")
         english_box.delete("1.0", "end")
         english_box.configure(state="disabled")
         return
 
-    # either pull from cache or call Google Translate
     if text in translation_cache:
         result = translation_cache[text]
     else:
-        result = translator.translate(text, src="ko", dest="en").text
-        translation_cache[text] = result
-        save_cache()
+        try:
+            result = translator.translate(text, src="ko", dest="en").text
+        except Exception:
+            result = "Translation not found in cache.\nPlease connect to the internet to translate this text."
 
-    # show it
+    # Show it
     english_box.configure(state="normal")
     english_box.delete("1.0", "end")
     english_box.insert("1.0", result)
