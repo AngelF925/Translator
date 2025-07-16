@@ -6,9 +6,10 @@ import re
 import time
 import os
 import json
+from tkinter import Canvas
 
 # App appearance
-ctk.set_appearance_mode("System")
+ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 translator = Translator()
 cancel_requested = False
@@ -45,6 +46,16 @@ def clear_cache():
 def cancel_translation():
     global cancel_requested
     cancel_requested = True
+    
+def smooth_progress_update(current_value, target_value, speed=0.01):
+    step = 0.001
+    while current_value < target_value:
+        current_value = min(current_value + step, target_value)
+        width = int(PROGRESS_WIDTH * current_value)
+        progress_canvas.coords(bar_fill, 0, 0, width, PROGRESS_HEIGHT)
+        progress_canvas.itemconfigure(progress_text, text=f"{round(current_value * 100)}%")
+        app.update_idletasks()
+        time.sleep(speed)
 
 def translate_file():
     def process_file():
@@ -54,9 +65,14 @@ def translate_file():
         input_path = filedialog.askopenfilename(filetypes=[("Text Files", "*.txt")])
         if not input_path:
             return
+
         output_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text Files", "*.txt")])
         if not output_path:
             return
+
+        # Move this line here — only show 0% after file is chosen
+        app.after(0, lambda: progress_canvas.itemconfigure(progress_text, state="normal"))
+        app.after(0, lambda: cancel_button.configure(state="normal"))
 
         try:
             with open(input_path, 'r', encoding='utf-8') as f:
@@ -68,17 +84,14 @@ def translate_file():
         total_lines = len(lines)
         translated_lines = []
 
-        app.after(0, lambda: progress_bar.set(0))
-        app.after(0, lambda: progress_label.configure(text="Progress: 0%"))
-        app.after(0, lambda: cancel_button.configure(state="normal"))
-
         i = 0
         while i < total_lines:
             if cancel_requested:
                 def handle_cancel_ui():
-                    progress_bar.set(0.0)
-                    progress_label.configure(text="Progress: 0%")
+                    progress_canvas.coords(bar_fill, 0, 0, 0, PROGRESS_HEIGHT)
+                    progress_canvas.itemconfigure(progress_text, text="0%")
                     cancel_button.configure(state="disabled")
+                    progress_canvas.itemconfigure(progress_text, state="hidden")
                     messagebox.showinfo("Cancelled", "Translation was cancelled.")
                 app.after(0, handle_cancel_ui)
                 break
@@ -125,8 +138,8 @@ def translate_file():
                     translated_lines.append(full_line)
 
             progress = min(i + batch_size, total_lines) / total_lines
-            app.after(0, lambda p=progress: progress_bar.set(p))
-            app.after(0, lambda p=progress: progress_label.configure(text=f"Progress: {int(p * 100)}%"))
+            current_fill = progress_canvas.coords(bar_fill)[2] / PROGRESS_WIDTH  # Get current width percent
+            smooth_progress_update(current_fill, progress)
 
             i += batch_size
             time.sleep(0.3)
@@ -135,9 +148,15 @@ def translate_file():
             with open(output_path, 'w', encoding='utf-16') as f:
                 f.writelines(translated_lines)
             save_cache()
-            app.after(0, lambda: messagebox.showinfo("Translation Complete", f"Saved to:\n{output_path}"))
 
-        app.after(0, lambda: cancel_button.configure(state="disabled"))
+            def handle_success_ui():
+                progress_canvas.coords(bar_fill, 0, 0, 0, 24)
+                progress_canvas.itemconfigure(progress_text, text="0%")
+                cancel_button.configure(state="disabled")
+                progress_canvas.itemconfigure(progress_text, state="hidden")
+                messagebox.showinfo("Translation Complete", f"Saved to:\n{output_path}")
+
+            app.after(0, handle_success_ui)
 
     threading.Thread(target=process_file).start()
 
@@ -164,8 +183,8 @@ def translate_selected_text():
         english_box.configure(state="disabled")
 
 # === BUTTON STYLE ===
-BUTTON_COLOR = "#1f6aa5"
-HOVER_COLOR = "#174c7a"
+BUTTON_COLOR = "#0078D7"
+HOVER_COLOR = "#106EBE"
 FG_COLOR = "#ffffff"
 
 def create_hover_button(parent, text, command):
@@ -177,40 +196,57 @@ def create_hover_button(parent, text, command):
         hover_color=HOVER_COLOR,
         text_color=FG_COLOR,
         font=DEFAULT_FONT,
-        corner_radius=6,
+        corner_radius=8,
         width=135,
-        height=32
+        height=32,
     )
 
 # === GUI SETUP ===
 app = ctk.CTk()
-app.title("PLC Translator")
-app.geometry("600x480+640+340")
+# Set window size
+window_width = 600
+window_height = 480
+
+# Get screen dimensions
+screen_width = app.winfo_screenwidth()
+screen_height = app.winfo_screenheight()
+
+# Calculate position (uses same style as Manual Maker)
+position_x = int(((screen_width // 2) - (window_width // 2)) * 2)
+position_y = int(((screen_height // 2) - (window_height // 2)) * 2)
+
+# Apply centered geometry
+app.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+app.configure(fg_color="#1E1E1E")
+icon_path = os.path.join(os.path.dirname(__file__), "blank.ico")
+app.iconbitmap(icon_path)
+app.title("")
 app.resizable(False, False)
 
-DEFAULT_FONT = ctk.CTkFont(size=14, weight="bold")
-TITLE_FONT = ctk.CTkFont(size=18, weight="bold")
+DEFAULT_FONT = ctk.CTkFont(family="Segoe UI", size=14, weight="bold")
+TITLE_FONT = ctk.CTkFont(family="Segoe UI", size=18, weight="bold")
 
 title_label = ctk.CTkLabel(app, text="PLC Translator", font=TITLE_FONT, text_color=FG_COLOR)
 title_label.pack(pady=5)
 
 # Buttons
-button_frame = ctk.CTkFrame(app)
+button_frame = ctk.CTkFrame(app, fg_color="transparent")
 button_frame.pack(pady=5)
 
-create_hover_button(button_frame, "Translate Full .txt File", translate_file) \
+create_hover_button(button_frame, "Translate .txt File", translate_file) \
     .pack(side="left", expand=True, fill="x", padx=5)
 create_hover_button(button_frame, "Clear Translation Cache", clear_cache) \
     .pack(side="left", expand=True, fill="x", padx=5)
 
 # Textboxes
-text_frame = ctk.CTkFrame(app)
+text_frame = ctk.CTkFrame(app, fg_color="black")
 text_frame.pack(padx=10, pady=(0, 0), fill="both", expand=True)
 
-korean_box = ctk.CTkTextbox(text_frame, wrap="word", height=8)
+korean_box = ctk.CTkTextbox(text_frame, wrap="word", height=8, font=DEFAULT_FONT, border_color=BUTTON_COLOR, border_width=2, corner_radius=6)
 korean_box.pack(side="left", padx=(0, 5), fill="both", expand=True)
 
-english_box = ctk.CTkTextbox(text_frame, wrap="word", state="disabled", height=8)
+english_box = ctk.CTkTextbox(text_frame, wrap="word", state="disabled", height=8, font=DEFAULT_FONT, border_color=BUTTON_COLOR, border_width=2, corner_radius=6)
 english_box.pack(side="left", padx=(5, 0), fill="both", expand=True)
 
 # Clear English box if Korean box is empty
@@ -254,15 +290,22 @@ def handle_focus_out(event=None):
 # Set placeholder on startup
 show_placeholder()
 
+def handle_keyrelease(event=None):
+    handle_key()
+    clear_english_if_empty()
+    schedule_auto_translate()
+
 # Bind events
 korean_box.bind("<FocusIn>", clear_placeholder)
 korean_box.bind("<FocusOut>", handle_focus_out)
-korean_box.bind("<KeyRelease>", handle_key)
-
-korean_box.bind("<KeyRelease>", clear_english_if_empty)
+korean_box.bind("<KeyRelease>", handle_keyrelease)
 
 def translate_all_text(event=None):
     text = korean_box.get("1.0", "end").strip()
+    
+    if not re.search(r'[가-힣]', text):
+        return
+
     if not text:
         english_box.configure(state="normal")
         english_box.delete("1.0", "end")
@@ -289,22 +332,24 @@ def schedule_auto_translate(event=None):
         app.after_cancel(app._auto_id)
     app._auto_id = app.after(300, translate_all_text)
     
-korean_box.bind("<KeyRelease>", schedule_auto_translate)
 korean_box.bind("<<Paste>>", schedule_auto_translate)
 
 
 # Bottom persistent bar
-bottom_frame = ctk.CTkFrame(app)
+bottom_frame = ctk.CTkFrame(app, fg_color="#1E1E1E")
 bottom_frame.pack(fill="x", pady=(5, 10))
 
-progress_bar = ctk.CTkProgressBar(bottom_frame, mode="determinate")
-progress_bar.pack(fill="x", padx=10, pady=2)
-progress_bar.set(0)
+PROGRESS_WIDTH = 800
+PROGRESS_HEIGHT = 34
+progress_canvas = Canvas(bottom_frame, width=PROGRESS_WIDTH, height=PROGRESS_HEIGHT, bg="black", highlightthickness=0)
+progress_canvas.pack(padx=5, pady=2)
 
-progress_label = ctk.CTkLabel(bottom_frame, text="Progress: 0%")
-progress_label.pack()
+bar_bg = progress_canvas.create_rectangle(0, 0, PROGRESS_WIDTH, PROGRESS_HEIGHT, fill="#1E1E1E", width=0)
+bar_fill = progress_canvas.create_rectangle(0, 0, 0, PROGRESS_HEIGHT, fill=BUTTON_COLOR, width=0)
+progress_text = progress_canvas.create_text(PROGRESS_WIDTH // 2, PROGRESS_HEIGHT // 2, text="0%", fill="white", font=("Segoe UI", 14, "bold"))
+progress_canvas.itemconfigure(progress_text, state="hidden")
 
-cancel_button = ctk.CTkButton(bottom_frame, text="Cancel Translation", command=cancel_translation, fg_color="red", hover_color="#bb0000", state="disabled")
+cancel_button = ctk.CTkButton(bottom_frame, text="Cancel Translation", command=cancel_translation, corner_radius=8, fg_color=BUTTON_COLOR, hover_color=HOVER_COLOR, state="disabled", font=DEFAULT_FONT)
 cancel_button.pack(pady=5)
 
 app.mainloop()
